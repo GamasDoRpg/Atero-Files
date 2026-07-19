@@ -6,9 +6,9 @@ import {
 async function iniciar() {
   const acesso =
     await exigirAplicativoAtero({
-      appId: "ID_APP",
+      appId: "files",
       nomeFallback:
-        "Atero APP_NAME"
+        "Atero Files"
     });
 
   if (!acesso) {
