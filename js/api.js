@@ -59,6 +59,15 @@ async function request(path, options = {}) {
   return payload;
 }
 
+async function cancelPendingUpload(itemId) {
+  if (!itemId) return;
+  try {
+    await request(`/uploads/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+  } catch (error) {
+    console.warn("Não foi possível cancelar o upload pendente.", error);
+  }
+}
+
 export async function listItems({ parentId = null, scope = "files", search = "", sort = "name.asc" } = {}) {
   const params = new URLSearchParams({ scope, sort });
   if (parentId) params.set("parent_id", parentId);
@@ -71,10 +80,54 @@ export async function createFolder({ name, parentId = null }) {
 }
 
 export async function uploadFile(file, parentId = null, signal = undefined) {
-  const form = new FormData();
-  form.append("file", file, file.name);
-  if (parentId) form.append("parent_id", parentId);
-  return request("/upload", { method: "POST", body: form, signal });
+  const prepared = await request("/uploads", {
+    method: "POST",
+    json: {
+      name: file.name,
+      size_bytes: file.size,
+      mime_type: file.type || "application/octet-stream",
+      parent_id: parentId
+    },
+    signal
+  });
+
+  const itemId = prepared?.item?.id;
+  const upload = prepared?.upload;
+  if (!itemId || !upload?.url) {
+    await cancelPendingUpload(itemId);
+    throw new FilesApiError(
+      "A API não retornou uma autorização de upload válida.",
+      500,
+      "invalid_upload_authorization"
+    );
+  }
+
+  try {
+    const uploadResponse = await fetch(upload.url, {
+      method: upload.method || "PUT",
+      mode: "cors",
+      cache: "no-store",
+      headers: upload.headers || { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+      signal
+    });
+
+    if (!uploadResponse.ok) {
+      throw new FilesApiError(
+        `O Cloudflare R2 recusou o upload com o status ${uploadResponse.status}.`,
+        uploadResponse.status,
+        "r2_upload_failed"
+      );
+    }
+
+    return await request(`/uploads/${encodeURIComponent(itemId)}/complete`, {
+      method: "POST",
+      signal
+    });
+  } catch (error) {
+    await cancelPendingUpload(itemId);
+    throw error;
+  }
 }
 
 export async function updateItem(itemId, changes) {
@@ -102,25 +155,20 @@ export async function getUsage() {
 }
 
 export async function downloadItem(item) {
-  const response = await fetch(`${API_BASE_URL}/items/${encodeURIComponent(item.id)}/download`, {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-    headers: { Accept: "application/octet-stream" }
-  });
-
-  if (!response.ok) {
-    const payload = await readPayload(response);
-    throw errorFromResponse(response, payload);
+  const download = await request(`/items/${encodeURIComponent(item.id)}/download`);
+  if (!download?.url) {
+    throw new FilesApiError(
+      "A API não retornou um link de download válido.",
+      500,
+      "invalid_download_url"
+    );
   }
 
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = item.name;
+  anchor.href = download.url;
+  anchor.download = download.filename || item.name;
+  anchor.rel = "noopener";
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
