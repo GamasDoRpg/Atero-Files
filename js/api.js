@@ -109,7 +109,6 @@ export async function uploadFile(file, parentId = null, signal = undefined) {
     const uploadResponse = await fetch(upload.url, {
       method: upload.method || "PUT",
       mode: "cors",
-      cache: "no-store",
       headers: upload.headers || { "Content-Type": file.type || "application/octet-stream" },
       body: file,
       signal
