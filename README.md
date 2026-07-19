@@ -2,35 +2,57 @@
 
 Aplicativo de arquivos da plataforma Atero, publicado em `files.atero.space`.
 
-## Primeira versão
+## Recursos atuais
 
 - Conta e autorização pelo Atero Hub e pela Atero API
 - Pastas e navegação por breadcrumbs
-- Upload e download de arquivos
+- Upload direto do navegador para o Cloudflare R2
+- Download por URL temporária assinada
 - Busca, ordenação, grade e lista
 - Favoritos, recentes e lixeira
 - Restauração e exclusão permanente
 - Indicador de armazenamento por plano
 - Interface responsiva e suporte a arrastar e soltar
 
-## Configuração do Supabase
+## Arquitetura de armazenamento
 
-Execute os arquivos abaixo, nesta ordem, no SQL Editor do projeto Supabase:
+- Supabase Auth: identidade e sessão
+- Supabase Postgres: metadados, pastas, permissões, lixeira e limites
+- Cloudflare R2: conteúdo binário dos novos arquivos
+- Atero API: autoriza uploads, confirma tamanho e gera URLs temporárias
+
+Credenciais permanentes do R2 ficam apenas na Atero API. O navegador recebe uma URL assinada curta para um único objeto.
+
+## SQL do Supabase
+
+Execute, nesta ordem:
 
 1. `supabase/atero-files.sql`
 2. `supabase/02-atero-files-restore-policy.sql`
+3. `supabase/03-atero-files-r2.sql`
 
-O primeiro script registra o aplicativo, cria a tabela `files_items`, o bucket privado `atero-files`, limites iniciais de armazenamento, funções e políticas RLS. O segundo ajusta a política usada na restauração recursiva de pastas.
+O terceiro script migra o modelo para R2, adiciona estados de upload e troca as escritas diretas na tabela por RPCs controladas.
 
-Limites iniciais configurados:
+## Cloudflare R2
 
-- Grátis: 1 GB
-- Pro: 50 GB
-- Ultra: 200 GB
-- Upload individual: 50 MB
+Crie um bucket privado chamado `atero-files` e aplique a política de CORS contida em:
 
-## Backend
+- `cloudflare/r2-cors.json`
 
-As rotas ficam no repositório `GamasDoRpg/atero-api`, sob o prefixo `/files`.
+Crie também uma regra de ciclo de vida para excluir objetos com o prefixo `pending/` depois de 1 dia. Os uploads são enviados primeiro para esse prefixo e promovidos para `users/` somente depois da confirmação de tamanho.
 
-O frontend não recebe chaves administrativas. A sessão é validada pela Atero API, que usa o JWT do usuário para acessar o Supabase sob RLS.
+Variáveis necessárias na Atero API:
+
+```text
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET_NAME=atero-files
+R2_PRESIGNED_URL_EXPIRY_SECONDS=600
+```
+
+Opcionalmente, `R2_ENDPOINT_URL` pode substituir o endpoint derivado do Account ID.
+
+## Compatibilidade
+
+Registros antigos continuam marcados com `storage_provider = 'supabase'` e permanecem legíveis. Novos uploads usam `storage_provider = 'r2'`.
