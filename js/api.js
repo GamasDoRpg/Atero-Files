@@ -1,5 +1,8 @@
 const API_BASE_URL = "https://api.atero.space/files";
 
+const uploadLimitLabel = document.querySelector('[data-new-action="upload"] small');
+if (uploadLimitLabel) uploadLimitLabel.textContent = "Até 5 GB por arquivo";
+
 export class FilesApiError extends Error {
   constructor(message, status = 500, code = "files_error", details = null) {
     super(message);
